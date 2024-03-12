@@ -11,18 +11,62 @@ public class AuthService : IAuthService
     private readonly AppDbContext _db;
     private readonly UserManager<ApplicationUser> _usermanager;
     private readonly RoleManager<IdentityRole> _roleManager;
+    private readonly IJwtTokenGenerator _jwtTokenGenerator;
 
     public AuthService(AppDbContext appDbContext, UserManager<ApplicationUser> usermanager,
-        RoleManager<IdentityRole> roleManager)
+        RoleManager<IdentityRole> roleManager, IJwtTokenGenerator jwtTokenGenerator)
     {
         this._db = appDbContext;
         this._usermanager = usermanager;
         this._roleManager = roleManager;
+        this._jwtTokenGenerator = jwtTokenGenerator;
     }
 
-    public Task<LoginrResponseDto> Login(LoginRequestDto loginRequestDto)
+    public async Task<bool> AssignRole(string email, string roleName)
     {
-        throw new NotImplementedException();
+        var user = _db.ApplicationUsers.FirstOrDefault(u => u.Email.ToLower() == email.ToLower());
+
+        if (user != null)
+        {
+            if (!_roleManager.RoleExistsAsync(roleName).GetAwaiter().GetResult()) {
+                _roleManager.CreateAsync(new (roleName)).GetAwaiter().GetResult();
+            }
+            
+            await _usermanager.AddToRoleAsync(user, roleName);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public async Task<LoginrResponseDto> Login(LoginRequestDto loginRequestDto)
+    {
+        var user = _db.ApplicationUsers.FirstOrDefault(u=> u.UserName.ToLower() == loginRequestDto.UserName.ToLower());
+
+        bool isValid = await _usermanager.CheckPasswordAsync(user, loginRequestDto.Password);
+        if (user ==null || !isValid)
+        {
+            return new LoginrResponseDto() { User=null, Token=""};
+        }
+
+        var token = _jwtTokenGenerator.GenerateToken(user);
+
+        UserDto userDto = new()
+        {
+            Email = user.Email,
+            Id = user.Id,
+            Name = user.Name,
+            PhoneNumber = user.PhoneNumber
+        };
+
+        LoginrResponseDto loginrResponseDto = new LoginrResponseDto()
+        {
+            User = userDto,
+            Token = token
+        };
+
+        return loginrResponseDto;
     }
 
     public async Task<string> Register(RegistrationRequestDto registrationRequestDto)
